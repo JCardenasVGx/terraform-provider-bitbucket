@@ -1,0 +1,1 @@
+terraform import bitbucket_branch_restriction.require_approvals payments-api/123456

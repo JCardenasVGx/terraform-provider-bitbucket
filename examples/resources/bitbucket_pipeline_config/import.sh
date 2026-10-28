@@ -1,0 +1,1 @@
+terraform import bitbucket_pipeline_config.api payments-api

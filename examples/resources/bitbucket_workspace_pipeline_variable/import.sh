@@ -1,0 +1,1 @@
+terraform import bitbucket_workspace_pipeline_variable.shared_registry {variable-uuid}

@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.3.0
+
+### Added
+
+- Provider: new `token` attribute (also `BITBUCKET_TOKEN`) to authenticate
+  with a Repository/Project/Workspace Access Token via
+  `Authorization: Bearer` instead of HTTP Basic Auth. Takes precedence over
+  `username`/`password` for every resource except `bitbucket_group` and
+  `bitbucket_group_membership`, which use Bitbucket's legacy v1.0 groups
+  API and don't accept Access Tokens at all — those two (and the
+  `bitbucket_group`/`bitbucket_groups`/`bitbucket_group_members` data
+  sources) still need `username`/`password` even when `token` is set.
+
 ## v1.2.0
 
 ### Added

@@ -64,11 +64,14 @@ project-level branch restrictions).
 
 ## Requirements
 
-- Go 1.25+ (pinned in `go.mod`)
+- Go 1.27+ (pinned in `go.mod`)
 - Terraform 1.x
-- A Bitbucket Cloud account with an API token or app password with
-  Projects, Repositories, Pipelines and Runners scopes, depending on which
-  resources you use
+- A Bitbucket Cloud credential with Projects, Repositories, Pipelines and
+  Runners scopes, depending on which resources you use — either:
+  - an app password / Atlassian API token (`username` + `password`), or
+  - a Repository/Project/Workspace Access Token (`token`) — except for
+    `bitbucket_group`/`bitbucket_group_membership`, which need
+    `username`+`password` regardless (see below)
 
 ## Using the provider
 
@@ -88,6 +91,24 @@ provider "bitbucket" {
   # BITBUCKET_PASSWORD instead of hardcoding them here.
 }
 ```
+
+Alternatively, authenticate with an Access Token instead of
+username/password:
+
+```hcl
+provider "bitbucket" {
+  workspace = "my-workspace"
+  token     = var.bitbucket_access_token # or BITBUCKET_TOKEN
+}
+```
+
+`token` is sent as `Authorization: Bearer <token>` and takes precedence
+over `username`/`password` for everything **except**
+`bitbucket_group`/`bitbucket_group_membership` (and the
+`bitbucket_group`/`bitbucket_groups`/`bitbucket_group_members` data
+sources): Bitbucket's legacy v1.0 groups API doesn't accept Access Tokens
+at all, so those still require `username`/`password` even when `token` is
+configured.
 
 See [`examples/`](./examples) for a runnable example per resource/data
 source, plus [`examples/complete`](./examples/complete) for everything

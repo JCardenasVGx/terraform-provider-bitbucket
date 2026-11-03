@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -1141,6 +1142,64 @@ func TestUserAndWorkspaceLookups(t *testing.T) {
 	}
 	if members[0].Username != "alice" || members[1].Username != "bob" {
 		t.Errorf("unexpected members: %+v", members)
+	}
+}
+
+func TestTokenAuthUsesBearer(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/workspaces/test-workspace", func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer my-access-token" {
+			t.Fatalf("expected Bearer auth header, got %q", auth)
+		}
+		if _, _, ok := r.BasicAuth(); ok {
+			t.Fatalf("expected no Basic Auth to be sent when a token is configured")
+		}
+		writeJSON(t, w, http.StatusOK, Workspace{Slug: "test-workspace"})
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{
+		baseURL:    srv.URL,
+		baseURLV1:  srv.URL,
+		workspace:  "test-workspace",
+		token:      "my-access-token",
+		httpClient: http.DefaultClient,
+	}
+
+	if _, err := c.GetWorkspace(context.Background()); err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+}
+
+func TestTokenAuthDoesNotApplyToV1API(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/groups/test-workspace/", func(w http.ResponseWriter, r *http.Request) {
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer") {
+			t.Fatalf("expected Basic Auth (not Bearer) against the v1.0 API, got %q", auth)
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "test-user" || pass != "test-pass" {
+			t.Fatalf("expected Basic Auth with username/password against the v1.0 API, got %q:%q (ok=%v)", user, pass, ok)
+		}
+		writeJSON(t, w, http.StatusOK, []Group{})
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{
+		baseURL:    srv.URL,
+		baseURLV1:  srv.URL,
+		workspace:  "test-workspace",
+		username:   "test-user",
+		password:   "test-pass",
+		token:      "my-access-token",
+		httpClient: http.DefaultClient,
+	}
+
+	if _, err := c.ListGroups(context.Background()); err != nil {
+		t.Fatalf("ListGroups: %v", err)
 	}
 }
 

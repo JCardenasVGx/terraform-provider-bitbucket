@@ -31,13 +31,21 @@ type Client struct {
 	workspace  string
 	username   string
 	password   string
+	token      string
 	httpClient *http.Client
 }
 
-// NewClient builds a Bitbucket Cloud API client authenticated with HTTP
-// Basic Auth (username + app password, or an Atlassian account email +
-// API token).
-func NewClient(workspace, username, password string) *Client {
+// NewClient builds a Bitbucket Cloud API client. If token is non-empty, it
+// authenticates every request with "Authorization: Bearer <token>" (a
+// Repository/Project/Workspace Access Token) and username/password are
+// ignored. Otherwise it falls back to HTTP Basic Auth (username + app
+// password, or an Atlassian account email + API token).
+//
+// Access Tokens cannot authenticate against the legacy v1.0 groups API
+// (see doc comment on defaultBaseURLV1): bitbucket_group and
+// bitbucket_group_membership always need username/password, even when a
+// token is configured for everything else.
+func NewClient(workspace, username, password, token string) *Client {
 	baseURL := defaultBaseURL
 	baseURLV1 := defaultBaseURLV1
 	if override := os.Getenv("BITBUCKET_BASE_URL"); override != "" {
@@ -53,6 +61,7 @@ func NewClient(workspace, username, password string) *Client {
 		workspace:  workspace,
 		username:   username,
 		password:   password,
+		token:      token,
 		httpClient: &http.Client{},
 	}
 }
@@ -79,16 +88,18 @@ func IsNotFound(err error) bool {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
-	return c.doWithBase(ctx, c.baseURL, method, path, body, out)
+	return c.doWithBase(ctx, c.baseURL, method, path, body, out, false)
 }
 
 // doV1 is like do but against the legacy v1.0 API (used only for workspace
-// groups, which have no v2.0 equivalent).
+// groups, which have no v2.0 equivalent). It always authenticates with
+// Basic Auth: Access Tokens aren't accepted by this API version, even when
+// the client is configured with one.
 func (c *Client) doV1(ctx context.Context, method, path string, body any, out any) error {
-	return c.doWithBase(ctx, c.baseURLV1, method, path, body, out)
+	return c.doWithBase(ctx, c.baseURLV1, method, path, body, out, true)
 }
 
-func (c *Client) doWithBase(ctx context.Context, base, method, path string, body any, out any) error {
+func (c *Client) doWithBase(ctx context.Context, base, method, path string, body any, out any, forceBasicAuth bool) error {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -102,7 +113,11 @@ func (c *Client) doWithBase(ctx context.Context, base, method, path string, body
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
 	}
-	req.SetBasicAuth(c.username, c.password)
+	if c.token != "" && !forceBasicAuth {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	} else {
+		req.SetBasicAuth(c.username, c.password)
+	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

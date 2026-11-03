@@ -1,6 +1,6 @@
 // Package bitbucket is a minimal REST client for the Bitbucket Cloud
 // API v2.0, covering only what the Terraform provider needs: projects,
-// repositories and branch restrictions.
+// repositories, branch restrictions and repository permissions.
 package bitbucket
 
 import (
@@ -207,6 +207,65 @@ func (c *Client) UpdateBranchRestriction(ctx context.Context, repoSlug string, i
 
 func (c *Client) DeleteBranchRestriction(ctx context.Context, repoSlug string, id int64) error {
 	path := fmt.Sprintf("/repositories/%s/%s/branch-restrictions/%d", c.workspace, repoSlug, id)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// --- Repository permissions (groups/users) --------------------------------
+
+func (c *Client) GetRepositoryGroupPermission(ctx context.Context, repoSlug, groupSlug string) (*RepositoryGroupPermission, error) {
+	var out RepositoryGroupPermission
+	path := fmt.Sprintf("/repositories/%s/%s/permissions-config/groups/%s", c.workspace, repoSlug, groupSlug)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) SetRepositoryGroupPermission(ctx context.Context, repoSlug, groupSlug, permission string) (*RepositoryGroupPermission, error) {
+	var out RepositoryGroupPermission
+	path := fmt.Sprintf("/repositories/%s/%s/permissions-config/groups/%s", c.workspace, repoSlug, groupSlug)
+	// The group is already identified by the URL; sending it again in the
+	// body would serialize as a non-empty object ({"slug":""}) since Go's
+	// omitempty doesn't apply to non-pointer structs.
+	body := &struct {
+		Permission string `json:"permission"`
+	}{Permission: permission}
+	if err := c.do(ctx, http.MethodPut, path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteRepositoryGroupPermission(ctx context.Context, repoSlug, groupSlug string) error {
+	path := fmt.Sprintf("/repositories/%s/%s/permissions-config/groups/%s", c.workspace, repoSlug, groupSlug)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (c *Client) GetRepositoryUserPermission(ctx context.Context, repoSlug, selectedUser string) (*RepositoryUserPermission, error) {
+	var out RepositoryUserPermission
+	path := fmt.Sprintf("/repositories/%s/%s/permissions-config/users/%s", c.workspace, repoSlug, selectedUser)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) SetRepositoryUserPermission(ctx context.Context, repoSlug, selectedUser, permission string) (*RepositoryUserPermission, error) {
+	var out RepositoryUserPermission
+	path := fmt.Sprintf("/repositories/%s/%s/permissions-config/users/%s", c.workspace, repoSlug, selectedUser)
+	// The user is already identified by the URL; see the comment in
+	// SetRepositoryGroupPermission for why the body only carries permission.
+	body := &struct {
+		Permission string `json:"permission"`
+	}{Permission: permission}
+	if err := c.do(ctx, http.MethodPut, path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteRepositoryUserPermission(ctx context.Context, repoSlug, selectedUser string) error {
+	path := fmt.Sprintf("/repositories/%s/%s/permissions-config/users/%s", c.workspace, repoSlug, selectedUser)
 	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 

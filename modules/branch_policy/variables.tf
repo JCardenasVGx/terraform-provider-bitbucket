@@ -32,3 +32,15 @@ variable "require_passing_builds" {
   description = "Require Pipelines builds to pass before merging. Only useful if bitbucket_pipeline_config.enabled = true on the repository."
   default     = false
 }
+
+variable "restrict_push_to_groups" {
+  type        = list(string)
+  description = "If non-empty, blocks direct pushes to the matched branches except for these workspace group slugs (e.g. [\"release-managers\"]). Leave empty to not restrict who can push."
+  default     = []
+}
+
+variable "restrict_push_to_users" {
+  type        = list(string)
+  description = "If non-empty, blocks direct pushes to the matched branches except for these user UUIDs. Leave empty to not restrict who can push."
+  default     = []
+}

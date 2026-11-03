@@ -15,12 +15,20 @@ import (
 func newMockBranchRestrictionServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
+	type accountRef struct {
+		UUID string `json:"uuid"`
+	}
+	type groupRef struct {
+		Slug string `json:"slug"`
+	}
 	type restriction struct {
-		ID              int64  `json:"id,omitempty"`
-		Kind            string `json:"kind"`
-		BranchMatchKind string `json:"branch_match_kind,omitempty"`
-		Pattern         string `json:"pattern,omitempty"`
-		Value           *int64 `json:"value,omitempty"`
+		ID              int64        `json:"id,omitempty"`
+		Kind            string       `json:"kind"`
+		BranchMatchKind string       `json:"branch_match_kind,omitempty"`
+		Pattern         string       `json:"pattern,omitempty"`
+		Value           *int64       `json:"value,omitempty"`
+		Users           []accountRef `json:"users,omitempty"`
+		Groups          []groupRef   `json:"groups,omitempty"`
 	}
 
 	var mu sync.Mutex
@@ -137,6 +145,35 @@ resource "bitbucket_branch_restriction" "test" {
 }
 `,
 				Check: resource.TestCheckResourceAttr("bitbucket_branch_restriction.test", "value", "3"),
+			},
+		},
+	})
+}
+
+func TestAccBranchRestrictionResource_PushWithGroups(t *testing.T) {
+	srv := newMockBranchRestrictionServer(t)
+	t.Setenv("BITBUCKET_BASE_URL", srv.URL)
+	t.Setenv("BITBUCKET_WORKSPACE", "acc-test-workspace")
+	t.Setenv("BITBUCKET_USERNAME", "acc-test-user")
+	t.Setenv("BITBUCKET_PASSWORD", "acc-test-pass")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "bitbucket_branch_restriction" "test" {
+  repository_slug   = "acc-repo"
+  kind              = "push"
+  branch_match_kind = "glob"
+  pattern           = "main"
+  groups            = ["release-managers"]
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("bitbucket_branch_restriction.test", "kind", "push"),
+					resource.TestCheckResourceAttr("bitbucket_branch_restriction.test", "groups.0", "release-managers"),
+				),
 			},
 		},
 	})

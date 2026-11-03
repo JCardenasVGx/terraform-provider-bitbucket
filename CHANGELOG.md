@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.1.0
+
+### Added
+
+- `bitbucket_branch_restriction`: new `users` and `groups` attributes to
+  scope a restriction to specific users/groups (e.g. who is allowed to
+  push directly on a `push` kind restriction).
+- `bitbucket_repository_group_permission`: grants a workspace group a
+  permission level (read/write/admin) on a repository.
+- `bitbucket_repository_user_permission`: grants a user a permission
+  level (read/write/admin) on a repository.
+- `modules/branch_policy`: new `restrict_push_to_groups` /
+  `restrict_push_to_users` variables to block direct pushes except for
+  specific groups/users.
+
 ## v1.0.0
 
 Initial release.

@@ -23,6 +23,8 @@ once released.
 | `bitbucket_repository_runner` | resource | Self-hosted runner registration (repository-level) |
 | `bitbucket_deployment_environment` | resource | Deployment environment (Test/Staging/Production) |
 | `bitbucket_deployment_variable` | resource | Variable scoped to one deployment environment |
+| `bitbucket_repository_group_permission` | resource | Workspace group permission grant on a repository |
+| `bitbucket_repository_user_permission` | resource | User permission grant on a repository |
 
 Also included: [`modules/branch_policy`](./modules/branch_policy), a
 reusable module that applies a standard set of branch restrictions to many

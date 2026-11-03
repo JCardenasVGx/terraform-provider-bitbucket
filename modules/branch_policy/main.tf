@@ -38,3 +38,14 @@ resource "bitbucket_branch_restriction" "require_passing_builds" {
   branch_match_kind = "glob"
   pattern           = each.value
 }
+
+resource "bitbucket_branch_restriction" "restrict_push" {
+  for_each = (length(var.restrict_push_to_groups) > 0 || length(var.restrict_push_to_users) > 0) ? local.patterns : toset([])
+
+  repository_slug   = var.repository_slug
+  kind              = "push"
+  branch_match_kind = "glob"
+  pattern           = each.value
+  groups            = var.restrict_push_to_groups
+  users             = var.restrict_push_to_users
+}

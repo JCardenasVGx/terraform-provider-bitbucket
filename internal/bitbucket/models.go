@@ -59,6 +59,20 @@ type GroupReference struct {
 	Slug string `json:"slug"`
 }
 
+// RepositoryGroupPermission grants a workspace group a permission level on
+// a repository.
+type RepositoryGroupPermission struct {
+	Permission string         `json:"permission"`
+	Group      GroupReference `json:"group,omitempty"`
+}
+
+// RepositoryUserPermission grants a user a permission level on a
+// repository.
+type RepositoryUserPermission struct {
+	Permission string           `json:"permission"`
+	User       AccountReference `json:"user,omitempty"`
+}
+
 // PipelinesConfig toggles Pipelines on/off for a repository.
 type PipelinesConfig struct {
 	Enabled bool `json:"enabled"`

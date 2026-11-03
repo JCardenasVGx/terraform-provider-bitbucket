@@ -1,0 +1,1 @@
+terraform import bitbucket_repository_group_permission.release_managers payments-api/release-managers

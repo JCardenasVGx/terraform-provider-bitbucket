@@ -1,0 +1,1 @@
+terraform import bitbucket_repository_user_permission.owner payments-api/jcardenas

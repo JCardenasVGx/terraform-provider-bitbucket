@@ -108,6 +108,8 @@ func (p *bitbucketProvider) Resources(_ context.Context) []func() resource.Resou
 		NewRepositoryRunnerResource,
 		NewDeploymentEnvironmentResource,
 		NewDeploymentVariableResource,
+		NewRepositoryGroupPermissionResource,
+		NewRepositoryUserPermissionResource,
 	}
 }
 

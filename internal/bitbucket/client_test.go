@@ -644,6 +644,111 @@ func TestGetDeploymentVariablePagination(t *testing.T) {
 	}
 }
 
+func TestRepositoryGroupPermissionCRUD(t *testing.T) {
+	mux := http.NewServeMux()
+	var granted *RepositoryGroupPermission
+	mux.HandleFunc("/repositories/test-workspace/payments-api/permissions-config/groups/release-managers", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodGet:
+			if granted == nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			writeJSON(t, w, http.StatusOK, granted)
+		case http.MethodPut:
+			var body RepositoryGroupPermission
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding body: %v", err)
+			}
+			body.Group = GroupReference{Slug: "release-managers"}
+			granted = &body
+			writeJSON(t, w, http.StatusOK, granted)
+		case http.MethodDelete:
+			granted = nil
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	if _, err := client.GetRepositoryGroupPermission(ctx, "payments-api", "release-managers"); !IsNotFound(err) {
+		t.Fatalf("expected not found before grant, got %v", err)
+	}
+
+	got, err := client.SetRepositoryGroupPermission(ctx, "payments-api", "release-managers", "write")
+	if err != nil {
+		t.Fatalf("SetRepositoryGroupPermission: %v", err)
+	}
+	if got.Permission != "write" {
+		t.Errorf("expected permission write, got %q", got.Permission)
+	}
+
+	if err := client.DeleteRepositoryGroupPermission(ctx, "payments-api", "release-managers"); err != nil {
+		t.Fatalf("DeleteRepositoryGroupPermission: %v", err)
+	}
+	if _, err := client.GetRepositoryGroupPermission(ctx, "payments-api", "release-managers"); !IsNotFound(err) {
+		t.Fatalf("expected not found after delete, got %v", err)
+	}
+}
+
+func TestRepositoryUserPermissionCRUD(t *testing.T) {
+	const selectedUser = "jcardenas"
+
+	mux := http.NewServeMux()
+	var granted *RepositoryUserPermission
+	mux.HandleFunc("/repositories/test-workspace/payments-api/permissions-config/users/"+selectedUser, func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodGet:
+			if granted == nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			writeJSON(t, w, http.StatusOK, granted)
+		case http.MethodPut:
+			var body RepositoryUserPermission
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding body: %v", err)
+			}
+			body.User = AccountReference{UUID: "{11111111-2222-3333-4444-555555555555}"}
+			granted = &body
+			writeJSON(t, w, http.StatusOK, granted)
+		case http.MethodDelete:
+			granted = nil
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	got, err := client.SetRepositoryUserPermission(ctx, "payments-api", selectedUser, "admin")
+	if err != nil {
+		t.Fatalf("SetRepositoryUserPermission: %v", err)
+	}
+	if got.Permission != "admin" {
+		t.Errorf("expected permission admin, got %q", got.Permission)
+	}
+
+	fetched, err := client.GetRepositoryUserPermission(ctx, "payments-api", selectedUser)
+	if err != nil {
+		t.Fatalf("GetRepositoryUserPermission: %v", err)
+	}
+	if fetched.Permission != "admin" {
+		t.Errorf("expected permission admin, got %q", fetched.Permission)
+	}
+
+	if err := client.DeleteRepositoryUserPermission(ctx, "payments-api", selectedUser); err != nil {
+		t.Fatalf("DeleteRepositoryUserPermission: %v", err)
+	}
+}
+
 func TestIsNotFound(t *testing.T) {
 	notFoundErr := &APIError{StatusCode: http.StatusNotFound, Body: "nope"}
 	if !IsNotFound(notFoundErr) {

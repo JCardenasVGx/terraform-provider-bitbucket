@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
@@ -35,6 +36,8 @@ type branchRestrictionResourceModel struct {
 	BranchMatchKind types.String `tfsdk:"branch_match_kind"`
 	Pattern         types.String `tfsdk:"pattern"`
 	Value           types.Int64  `tfsdk:"value"`
+	Users           types.List   `tfsdk:"users"`
+	Groups          types.List   `tfsdk:"groups"`
 }
 
 func (r *branchRestrictionResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -88,6 +91,18 @@ func (r *branchRestrictionResource) Schema(_ context.Context, _ resource.SchemaR
 				Computed:    true,
 				Description: "Numeric value for restrictions that need one, e.g. required approval count.",
 			},
+			"users": schema.ListAttribute{
+				ElementType: types.StringType,
+				Optional:    true,
+				Computed:    true,
+				Description: "UUIDs of the users this restriction applies to, e.g. who is allowed to push directly on a \"push\" kind restriction. Leave unset for restrictions that don't scope to specific users.",
+			},
+			"groups": schema.ListAttribute{
+				ElementType: types.StringType,
+				Optional:    true,
+				Computed:    true,
+				Description: "Slugs of the workspace groups this restriction applies to, e.g. which groups are allowed to push directly on a \"push\" kind restriction. Leave unset for restrictions that don't scope to specific groups.",
+			},
 		},
 	}
 }
@@ -115,6 +130,8 @@ func (r *branchRestrictionResource) Create(ctx context.Context, req resource.Cre
 		Kind:            plan.Kind.ValueString(),
 		BranchMatchKind: firstNonEmpty(plan.BranchMatchKind.ValueString(), "glob"),
 		Pattern:         plan.Pattern.ValueString(),
+		Users:           accountReferencesFromList(ctx, plan.Users),
+		Groups:          groupReferencesFromList(ctx, plan.Groups),
 	}
 	if !plan.Value.IsNull() && !plan.Value.IsUnknown() {
 		v := plan.Value.ValueInt64()
@@ -127,7 +144,9 @@ func (r *branchRestrictionResource) Create(ctx context.Context, req resource.Cre
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, branchRestrictionModelFromAPI(r.client.Workspace(), plan.RepositorySlug.ValueString(), created))...)
+	model, diags := branchRestrictionModelFromAPI(ctx, r.client.Workspace(), plan.RepositorySlug.ValueString(), created)
+	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }
 
 func (r *branchRestrictionResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -147,7 +166,9 @@ func (r *branchRestrictionResource) Read(ctx context.Context, req resource.ReadR
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, branchRestrictionModelFromAPI(r.client.Workspace(), state.RepositorySlug.ValueString(), br))...)
+	model, diags := branchRestrictionModelFromAPI(ctx, r.client.Workspace(), state.RepositorySlug.ValueString(), br)
+	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }
 
 func (r *branchRestrictionResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -161,6 +182,8 @@ func (r *branchRestrictionResource) Update(ctx context.Context, req resource.Upd
 		Kind:            plan.Kind.ValueString(),
 		BranchMatchKind: plan.BranchMatchKind.ValueString(),
 		Pattern:         plan.Pattern.ValueString(),
+		Users:           accountReferencesFromList(ctx, plan.Users),
+		Groups:          groupReferencesFromList(ctx, plan.Groups),
 	}
 	if !plan.Value.IsNull() && !plan.Value.IsUnknown() {
 		v := plan.Value.ValueInt64()
@@ -173,7 +196,9 @@ func (r *branchRestrictionResource) Update(ctx context.Context, req resource.Upd
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, branchRestrictionModelFromAPI(r.client.Workspace(), plan.RepositorySlug.ValueString(), updated))...)
+	model, diags := branchRestrictionModelFromAPI(ctx, r.client.Workspace(), plan.RepositorySlug.ValueString(), updated)
+	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, model)...)
 }
 
 func (r *branchRestrictionResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -208,10 +233,15 @@ func (r *branchRestrictionResource) ImportState(ctx context.Context, req resourc
 	var state branchRestrictionResourceModel
 	state.RepositorySlug = types.StringValue(parts[0])
 	state.RestrictionID = types.Int64Value(id)
+	// Users/Groups must be explicitly typed nulls (not the zero value of
+	// types.List{}, which carries no ElementType) so the partial state set
+	// here round-trips correctly before the follow-up Read fills it in.
+	state.Users = types.ListNull(types.StringType)
+	state.Groups = types.ListNull(types.StringType)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
-func branchRestrictionModelFromAPI(workspace, repoSlug string, br *bitbucket.BranchRestriction) branchRestrictionResourceModel {
+func branchRestrictionModelFromAPI(ctx context.Context, workspace, repoSlug string, br *bitbucket.BranchRestriction) (branchRestrictionResourceModel, diag.Diagnostics) {
 	m := branchRestrictionResourceModel{
 		ID:              types.StringValue(fmt.Sprintf("%s/%s/%d", workspace, repoSlug, br.ID)),
 		RepositorySlug:  types.StringValue(repoSlug),
@@ -225,5 +255,52 @@ func branchRestrictionModelFromAPI(workspace, repoSlug string, br *bitbucket.Bra
 	} else {
 		m.Value = types.Int64Null()
 	}
-	return m
+
+	var diags diag.Diagnostics
+
+	userUUIDs := make([]string, 0, len(br.Users))
+	for _, u := range br.Users {
+		userUUIDs = append(userUUIDs, u.UUID)
+	}
+	usersList, d := types.ListValueFrom(ctx, types.StringType, userUUIDs)
+	diags.Append(d...)
+	m.Users = usersList
+
+	groupSlugs := make([]string, 0, len(br.Groups))
+	for _, g := range br.Groups {
+		groupSlugs = append(groupSlugs, g.Slug)
+	}
+	groupsList, d := types.ListValueFrom(ctx, types.StringType, groupSlugs)
+	diags.Append(d...)
+	m.Groups = groupsList
+
+	return m, diags
+}
+
+// accountReferencesFromList converts a Terraform string list of user UUIDs
+// into the AccountReference slice the Bitbucket API expects.
+func accountReferencesFromList(ctx context.Context, l types.List) []bitbucket.AccountReference {
+	uuids := stringListToSlice(ctx, l)
+	if uuids == nil {
+		return nil
+	}
+	out := make([]bitbucket.AccountReference, 0, len(uuids))
+	for _, uuid := range uuids {
+		out = append(out, bitbucket.AccountReference{UUID: uuid})
+	}
+	return out
+}
+
+// groupReferencesFromList converts a Terraform string list of group slugs
+// into the GroupReference slice the Bitbucket API expects.
+func groupReferencesFromList(ctx context.Context, l types.List) []bitbucket.GroupReference {
+	slugs := stringListToSlice(ctx, l)
+	if slugs == nil {
+		return nil
+	}
+	out := make([]bitbucket.GroupReference, 0, len(slugs))
+	for _, slug := range slugs {
+		out = append(out, bitbucket.GroupReference{Slug: slug})
+	}
+	return out
 }

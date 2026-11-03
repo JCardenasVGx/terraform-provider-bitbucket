@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.2.0
+
+### Added
+
+Resources:
+
+- `bitbucket_project_group_permission` / `bitbucket_project_user_permission`:
+  permission grants at the project level (applies to every repository
+  inside it), mirroring the existing repository-level equivalents.
+- `bitbucket_default_reviewer` / `bitbucket_project_default_reviewer`:
+  default pull request reviewers, at the repository or project level.
+- `bitbucket_group` / `bitbucket_group_membership`: manage workspace
+  groups and their members (via Bitbucket Cloud's legacy v1.0 API, which
+  has no v2.0 replacement for this).
+- `bitbucket_hook` / `bitbucket_workspace_hook`: webhooks at the
+  repository or workspace level.
+- `bitbucket_branching_model` / `bitbucket_project_branching_model`:
+  development/production branch configuration, at the repository or
+  project level.
+
+Data sources (mainly to resolve UUIDs/slugs instead of hardcoding them):
+
+- `bitbucket_workspace`, `bitbucket_user`, `bitbucket_current_user`
+- `bitbucket_group`, `bitbucket_groups`, `bitbucket_group_members`
+- `bitbucket_workspace_members`
+
+### Known limitations (unchanged from v1.1.0, still out of scope)
+
+- No deploy keys, SSH keys or GPG keys.
+- No pipeline schedules, pipeline SSH keys/known hosts.
+- No forked-repository or file-content (`commit_file`-style) resources —
+  the latter is a deliberate omission: committing file content through
+  Terraform state is an anti-pattern most teams should avoid.
+- `bitbucket_branching_model`/`bitbucket_project_branching_model` only
+  cover development/production branch settings, not custom branch-type
+  prefixes (feature/bugfix/release/hotfix).
+- No project-level branch restrictions (Bitbucket Cloud has no public API
+  for it) — use `modules/branch_policy` to apply the same policy to every
+  repository in a project instead.
+
 ## v1.1.0
 
 ### Added

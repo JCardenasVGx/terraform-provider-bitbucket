@@ -1,0 +1,1 @@
+terraform import bitbucket_project_branching_model.platform PLAT

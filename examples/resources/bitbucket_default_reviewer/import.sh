@@ -1,0 +1,1 @@
+terraform import bitbucket_default_reviewer.lead payments-api/jcardenas

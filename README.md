@@ -25,6 +25,20 @@ once released.
 | `bitbucket_deployment_variable` | resource | Variable scoped to one deployment environment |
 | `bitbucket_repository_group_permission` | resource | Workspace group permission grant on a repository |
 | `bitbucket_repository_user_permission` | resource | User permission grant on a repository |
+| `bitbucket_project_group_permission` | resource | Workspace group permission grant on a project |
+| `bitbucket_project_user_permission` | resource | User permission grant on a project |
+| `bitbucket_default_reviewer` | resource | Default PR reviewer on a repository |
+| `bitbucket_project_default_reviewer` | resource | Default PR reviewer on a project |
+| `bitbucket_group` | resource + data source | Workspace group (legacy v1.0 API) |
+| `bitbucket_group_membership` | resource | Membership of a user in a workspace group |
+| `bitbucket_hook` | resource | Webhook on a repository |
+| `bitbucket_workspace_hook` | resource | Webhook on the workspace |
+| `bitbucket_branching_model` | resource | Development/production branch config on a repository |
+| `bitbucket_project_branching_model` | resource | Development/production branch config on a project |
+| `bitbucket_workspace` | data source | The configured workspace |
+| `bitbucket_user` / `bitbucket_current_user` | data source | Resolve a user's UUID by selector / the authenticated user |
+| `bitbucket_groups` / `bitbucket_group_members` | data source | List groups / list a group's members |
+| `bitbucket_workspace_members` | data source | List every member of the workspace |
 
 Also included: [`modules/branch_policy`](./modules/branch_policy), a
 reusable module that applies a standard set of branch restrictions to many
@@ -39,7 +53,14 @@ project-level branch restrictions).
   endpoint used by the web app itself). It cannot be managed via IaC. Use
   `modules/branch_policy` to apply the same policy to every repository in
   a project instead.
-- Webhooks, deploy keys and default reviewers are not implemented yet.
+- No deploy keys, SSH keys or GPG keys.
+- No pipeline schedules, pipeline SSH keys/known hosts.
+- No forked-repository resource, and deliberately no file-content
+  (`commit_file`-style) resource — committing file content through
+  Terraform state is an anti-pattern most teams should avoid.
+- `bitbucket_branching_model` / `bitbucket_project_branching_model` only
+  cover development/production branch settings, not custom branch-type
+  prefixes (feature/bugfix/release/hotfix).
 
 ## Requirements
 

@@ -1,0 +1,1 @@
+terraform import bitbucket_group.release_managers release-managers

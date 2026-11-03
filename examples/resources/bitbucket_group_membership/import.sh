@@ -1,0 +1,1 @@
+terraform import bitbucket_group_membership.jcardenas release-managers/jcardenas

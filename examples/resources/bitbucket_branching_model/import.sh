@@ -1,0 +1,1 @@
+terraform import bitbucket_branching_model.api payments-api

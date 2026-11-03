@@ -1,0 +1,1 @@
+terraform import bitbucket_project_group_permission.release_managers PLAT/release-managers

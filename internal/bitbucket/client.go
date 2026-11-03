@@ -1,6 +1,8 @@
-// Package bitbucket is a minimal REST client for the Bitbucket Cloud
-// API v2.0, covering only what the Terraform provider needs: projects,
-// repositories, branch restrictions and repository permissions.
+// Package bitbucket is a minimal REST client for the Bitbucket Cloud API,
+// covering what the Terraform provider needs: projects, repositories,
+// branch restrictions, repository/project permissions, default reviewers,
+// webhooks, branching models and workspace groups (the latter via the
+// legacy v1.0 API, which has no v2.0 replacement).
 package bitbucket
 
 import (
@@ -14,11 +16,18 @@ import (
 	"strings"
 )
 
-const defaultBaseURL = "https://api.bitbucket.org/2.0"
+const (
+	defaultBaseURL = "https://api.bitbucket.org/2.0"
+	// defaultBaseURLV1 is the legacy v1.0 API. Bitbucket Cloud never shipped
+	// a v2.0 replacement for workspace groups, so group management still
+	// has to go through this deprecated-but-still-live version.
+	defaultBaseURLV1 = "https://api.bitbucket.org/1.0"
+)
 
 // Client talks to the Bitbucket Cloud REST API on behalf of one workspace.
 type Client struct {
 	baseURL    string
+	baseURLV1  string
 	workspace  string
 	username   string
 	password   string
@@ -30,13 +39,17 @@ type Client struct {
 // API token).
 func NewClient(workspace, username, password string) *Client {
 	baseURL := defaultBaseURL
+	baseURLV1 := defaultBaseURLV1
 	if override := os.Getenv("BITBUCKET_BASE_URL"); override != "" {
 		// Lets unit/acceptance tests point the client at a local mock server
-		// instead of the real Bitbucket Cloud API.
+		// instead of the real Bitbucket Cloud API. The mock server handles
+		// both API versions on the same mux, so both bases point at it.
 		baseURL = override
+		baseURLV1 = override
 	}
 	return &Client{
 		baseURL:    baseURL,
+		baseURLV1:  baseURLV1,
 		workspace:  workspace,
 		username:   username,
 		password:   password,
@@ -66,6 +79,16 @@ func IsNotFound(err error) bool {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+	return c.doWithBase(ctx, c.baseURL, method, path, body, out)
+}
+
+// doV1 is like do but against the legacy v1.0 API (used only for workspace
+// groups, which have no v2.0 equivalent).
+func (c *Client) doV1(ctx context.Context, method, path string, body any, out any) error {
+	return c.doWithBase(ctx, c.baseURLV1, method, path, body, out)
+}
+
+func (c *Client) doWithBase(ctx context.Context, base, method, path string, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -75,7 +98,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		reqBody = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, base+path, reqBody)
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
 	}
@@ -520,4 +543,361 @@ func relativePath(fullURL, baseURL string) (string, error) {
 		return "", fmt.Errorf("unexpected pagination URL %q outside of base %q", fullURL, baseURL)
 	}
 	return strings.TrimPrefix(fullURL, baseURL), nil
+}
+
+// --- Default reviewers (repository) ----------------------------------------
+
+func (c *Client) GetDefaultReviewer(ctx context.Context, repoSlug, selectedUser string) (*DefaultReviewer, error) {
+	var out DefaultReviewer
+	path := fmt.Sprintf("/repositories/%s/%s/default-reviewers/%s", c.workspace, repoSlug, selectedUser)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) AddDefaultReviewer(ctx context.Context, repoSlug, selectedUser string) (*DefaultReviewer, error) {
+	var out DefaultReviewer
+	path := fmt.Sprintf("/repositories/%s/%s/default-reviewers/%s", c.workspace, repoSlug, selectedUser)
+	if err := c.do(ctx, http.MethodPut, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) RemoveDefaultReviewer(ctx context.Context, repoSlug, selectedUser string) error {
+	path := fmt.Sprintf("/repositories/%s/%s/default-reviewers/%s", c.workspace, repoSlug, selectedUser)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// --- Default reviewers (project) --------------------------------------------
+
+func (c *Client) GetProjectDefaultReviewer(ctx context.Context, projectKey, selectedUser string) (*DefaultReviewer, error) {
+	var out DefaultReviewer
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/default-reviewers/%s", c.workspace, projectKey, selectedUser)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) AddProjectDefaultReviewer(ctx context.Context, projectKey, selectedUser string) (*DefaultReviewer, error) {
+	var out DefaultReviewer
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/default-reviewers/%s", c.workspace, projectKey, selectedUser)
+	if err := c.do(ctx, http.MethodPut, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) RemoveProjectDefaultReviewer(ctx context.Context, projectKey, selectedUser string) error {
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/default-reviewers/%s", c.workspace, projectKey, selectedUser)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// --- Project permissions (groups/users) -------------------------------------
+
+func (c *Client) GetProjectGroupPermission(ctx context.Context, projectKey, groupSlug string) (*ProjectGroupPermission, error) {
+	var out ProjectGroupPermission
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/permissions-config/groups/%s", c.workspace, projectKey, groupSlug)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) SetProjectGroupPermission(ctx context.Context, projectKey, groupSlug, permission string) (*ProjectGroupPermission, error) {
+	var out ProjectGroupPermission
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/permissions-config/groups/%s", c.workspace, projectKey, groupSlug)
+	body := &struct {
+		Permission string `json:"permission"`
+	}{Permission: permission}
+	if err := c.do(ctx, http.MethodPut, path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteProjectGroupPermission(ctx context.Context, projectKey, groupSlug string) error {
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/permissions-config/groups/%s", c.workspace, projectKey, groupSlug)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (c *Client) GetProjectUserPermission(ctx context.Context, projectKey, selectedUser string) (*ProjectUserPermission, error) {
+	var out ProjectUserPermission
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/permissions-config/users/%s", c.workspace, projectKey, selectedUser)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) SetProjectUserPermission(ctx context.Context, projectKey, selectedUser, permission string) (*ProjectUserPermission, error) {
+	var out ProjectUserPermission
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/permissions-config/users/%s", c.workspace, projectKey, selectedUser)
+	body := &struct {
+		Permission string `json:"permission"`
+	}{Permission: permission}
+	if err := c.do(ctx, http.MethodPut, path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteProjectUserPermission(ctx context.Context, projectKey, selectedUser string) error {
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/permissions-config/users/%s", c.workspace, projectKey, selectedUser)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// --- Webhooks (repository) --------------------------------------------------
+
+func (c *Client) CreateHook(ctx context.Context, repoSlug string, h *Hook) (*Hook, error) {
+	var out Hook
+	path := fmt.Sprintf("/repositories/%s/%s/hooks", c.workspace, repoSlug)
+	if err := c.do(ctx, http.MethodPost, path, h, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetHook(ctx context.Context, repoSlug, uuid string) (*Hook, error) {
+	var out Hook
+	path := fmt.Sprintf("/repositories/%s/%s/hooks/%s", c.workspace, repoSlug, uuid)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) UpdateHook(ctx context.Context, repoSlug, uuid string, h *Hook) (*Hook, error) {
+	var out Hook
+	path := fmt.Sprintf("/repositories/%s/%s/hooks/%s", c.workspace, repoSlug, uuid)
+	if err := c.do(ctx, http.MethodPut, path, h, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteHook(ctx context.Context, repoSlug, uuid string) error {
+	path := fmt.Sprintf("/repositories/%s/%s/hooks/%s", c.workspace, repoSlug, uuid)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// --- Webhooks (workspace) ---------------------------------------------------
+
+func (c *Client) CreateWorkspaceHook(ctx context.Context, h *Hook) (*Hook, error) {
+	var out Hook
+	path := fmt.Sprintf("/workspaces/%s/hooks", c.workspace)
+	if err := c.do(ctx, http.MethodPost, path, h, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetWorkspaceHook(ctx context.Context, uuid string) (*Hook, error) {
+	var out Hook
+	path := fmt.Sprintf("/workspaces/%s/hooks/%s", c.workspace, uuid)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) UpdateWorkspaceHook(ctx context.Context, uuid string, h *Hook) (*Hook, error) {
+	var out Hook
+	path := fmt.Sprintf("/workspaces/%s/hooks/%s", c.workspace, uuid)
+	if err := c.do(ctx, http.MethodPut, path, h, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteWorkspaceHook(ctx context.Context, uuid string) error {
+	path := fmt.Sprintf("/workspaces/%s/hooks/%s", c.workspace, uuid)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// --- Branching model (repository) -------------------------------------------
+
+func (c *Client) GetBranchingModelSettings(ctx context.Context, repoSlug string) (*BranchingModelSettings, error) {
+	var out BranchingModelSettings
+	path := fmt.Sprintf("/repositories/%s/%s/branching-model/settings", c.workspace, repoSlug)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) UpdateBranchingModelSettings(ctx context.Context, repoSlug string, s *BranchingModelSettings) (*BranchingModelSettings, error) {
+	var out BranchingModelSettings
+	path := fmt.Sprintf("/repositories/%s/%s/branching-model/settings", c.workspace, repoSlug)
+	if err := c.do(ctx, http.MethodPut, path, s, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// --- Branching model (project) ----------------------------------------------
+
+func (c *Client) GetProjectBranchingModelSettings(ctx context.Context, projectKey string) (*BranchingModelSettings, error) {
+	var out BranchingModelSettings
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/branching-model/settings", c.workspace, projectKey)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) UpdateProjectBranchingModelSettings(ctx context.Context, projectKey string, s *BranchingModelSettings) (*BranchingModelSettings, error) {
+	var out BranchingModelSettings
+	path := fmt.Sprintf("/workspaces/%s/projects/%s/branching-model/settings", c.workspace, projectKey)
+	if err := c.do(ctx, http.MethodPut, path, s, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// --- Groups (legacy v1.0 API) ------------------------------------------------
+
+func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
+	var out []Group
+	path := fmt.Sprintf("/groups/%s/", c.workspace)
+	if err := c.doV1(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetGroup finds one group by slug. The v1.0 API has no get-by-slug
+// endpoint, only list, so this filters client-side.
+func (c *Client) GetGroup(ctx context.Context, slug string) (*Group, error) {
+	groups, err := c.ListGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range groups {
+		if groups[i].Slug == slug {
+			return &groups[i], nil
+		}
+	}
+	return nil, &APIError{StatusCode: http.StatusNotFound, Body: fmt.Sprintf("group %q not found", slug)}
+}
+
+func (c *Client) CreateGroup(ctx context.Context, g *Group) (*Group, error) {
+	var out Group
+	path := fmt.Sprintf("/groups/%s/", c.workspace)
+	body := &struct {
+		Name string `json:"name"`
+	}{Name: g.Name}
+	if err := c.doV1(ctx, http.MethodPost, path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) UpdateGroup(ctx context.Context, slug string, g *Group) (*Group, error) {
+	var out Group
+	path := fmt.Sprintf("/groups/%s/%s/", c.workspace, slug)
+	if err := c.doV1(ctx, http.MethodPut, path, g, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) DeleteGroup(ctx context.Context, slug string) error {
+	path := fmt.Sprintf("/groups/%s/%s/", c.workspace, slug)
+	return c.doV1(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// --- Group membership (legacy v1.0 API) -------------------------------------
+
+func (c *Client) ListGroupMembers(ctx context.Context, groupSlug string) ([]GroupMember, error) {
+	var out []GroupMember
+	path := fmt.Sprintf("/groups/%s/%s/members/", c.workspace, groupSlug)
+	if err := c.doV1(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) AddGroupMember(ctx context.Context, groupSlug, selectedUser string) error {
+	path := fmt.Sprintf("/groups/%s/%s/members/%s/", c.workspace, groupSlug, selectedUser)
+	return c.doV1(ctx, http.MethodPut, path, nil, nil)
+}
+
+func (c *Client) RemoveGroupMember(ctx context.Context, groupSlug, selectedUser string) error {
+	path := fmt.Sprintf("/groups/%s/%s/members/%s/", c.workspace, groupSlug, selectedUser)
+	return c.doV1(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// IsGroupMember reports whether selectedUser is currently a member of
+// groupSlug, since the v1.0 API has no single-member get endpoint.
+func (c *Client) IsGroupMember(ctx context.Context, groupSlug, selectedUser string) (bool, error) {
+	members, err := c.ListGroupMembers(ctx, groupSlug)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range members {
+		if m.UUID == selectedUser || m.Username == selectedUser {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// --- Users / workspace lookups ----------------------------------------------
+
+func (c *Client) GetUser(ctx context.Context, selectedUser string) (*User, error) {
+	var out User
+	path := fmt.Sprintf("/users/%s", selectedUser)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetCurrentUser(ctx context.Context) (*User, error) {
+	var out User
+	if err := c.do(ctx, http.MethodGet, "/user", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetWorkspace(ctx context.Context) (*Workspace, error) {
+	var out Workspace
+	path := fmt.Sprintf("/workspaces/%s", c.workspace)
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListWorkspaceMembers returns every member of the client's workspace,
+// following pagination.
+func (c *Client) ListWorkspaceMembers(ctx context.Context) ([]User, error) {
+	var users []User
+	path := fmt.Sprintf("/workspaces/%s/members", c.workspace)
+	for path != "" {
+		var page struct {
+			Values []workspaceMembership `json:"values"`
+			Next   string                `json:"next,omitempty"`
+		}
+		fetchPath := path
+		if strings.HasPrefix(path, "http") {
+			var err error
+			fetchPath, err = relativePath(path, c.baseURL)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err := c.do(ctx, http.MethodGet, fetchPath, nil, &page); err != nil {
+			return nil, err
+		}
+		for _, m := range page.Values {
+			users = append(users, m.User)
+		}
+		path = page.Next
+	}
+	return users, nil
 }

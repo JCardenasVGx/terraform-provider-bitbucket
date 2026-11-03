@@ -1,0 +1,1 @@
+terraform import bitbucket_project_default_reviewer.lead PLAT/jcardenas

@@ -17,6 +17,7 @@ func newTestClient(t *testing.T, mux *http.ServeMux) (*Client, *httptest.Server)
 	t.Cleanup(srv.Close)
 	c := &Client{
 		baseURL:    srv.URL,
+		baseURLV1:  srv.URL,
 		workspace:  "test-workspace",
 		username:   "test-user",
 		password:   "test-pass",
@@ -746,6 +747,400 @@ func TestRepositoryUserPermissionCRUD(t *testing.T) {
 
 	if err := client.DeleteRepositoryUserPermission(ctx, "payments-api", selectedUser); err != nil {
 		t.Fatalf("DeleteRepositoryUserPermission: %v", err)
+	}
+}
+
+func TestDefaultReviewerCRUD(t *testing.T) {
+	mux := http.NewServeMux()
+	exists := false
+	mux.HandleFunc("/repositories/test-workspace/payments-api/default-reviewers/jcardenas", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodGet:
+			if !exists {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			writeJSON(t, w, http.StatusOK, DefaultReviewer{UUID: "{u}", DisplayName: "Jesus Cardenas"})
+		case http.MethodPut:
+			exists = true
+			writeJSON(t, w, http.StatusOK, DefaultReviewer{UUID: "{u}", DisplayName: "Jesus Cardenas"})
+		case http.MethodDelete:
+			exists = false
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	if _, err := client.GetDefaultReviewer(ctx, "payments-api", "jcardenas"); !IsNotFound(err) {
+		t.Fatalf("expected not found before add, got %v", err)
+	}
+	if _, err := client.AddDefaultReviewer(ctx, "payments-api", "jcardenas"); err != nil {
+		t.Fatalf("AddDefaultReviewer: %v", err)
+	}
+	if _, err := client.GetDefaultReviewer(ctx, "payments-api", "jcardenas"); err != nil {
+		t.Fatalf("GetDefaultReviewer: %v", err)
+	}
+	if err := client.RemoveDefaultReviewer(ctx, "payments-api", "jcardenas"); err != nil {
+		t.Fatalf("RemoveDefaultReviewer: %v", err)
+	}
+	if _, err := client.GetDefaultReviewer(ctx, "payments-api", "jcardenas"); !IsNotFound(err) {
+		t.Fatalf("expected not found after remove, got %v", err)
+	}
+}
+
+func TestProjectGroupPermissionCRUD(t *testing.T) {
+	mux := http.NewServeMux()
+	var permission string
+	mux.HandleFunc("/workspaces/test-workspace/projects/PROJ/permissions-config/groups/release-managers", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodPut:
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding body: %v", err)
+			}
+			permission = body["permission"]
+			writeJSON(t, w, http.StatusOK, ProjectGroupPermission{Permission: permission})
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, ProjectGroupPermission{Permission: permission})
+		case http.MethodDelete:
+			permission = ""
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	got, err := client.SetProjectGroupPermission(ctx, "PROJ", "release-managers", "admin")
+	if err != nil {
+		t.Fatalf("SetProjectGroupPermission: %v", err)
+	}
+	if got.Permission != "admin" {
+		t.Errorf("expected admin, got %q", got.Permission)
+	}
+	if err := client.DeleteProjectGroupPermission(ctx, "PROJ", "release-managers"); err != nil {
+		t.Fatalf("DeleteProjectGroupPermission: %v", err)
+	}
+}
+
+func TestProjectUserPermissionCRUD(t *testing.T) {
+	mux := http.NewServeMux()
+	var permission string
+	mux.HandleFunc("/workspaces/test-workspace/projects/PROJ/permissions-config/users/jcardenas", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodPut:
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding body: %v", err)
+			}
+			permission = body["permission"]
+			writeJSON(t, w, http.StatusOK, ProjectUserPermission{Permission: permission})
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, ProjectUserPermission{Permission: permission})
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	got, err := client.SetProjectUserPermission(ctx, "PROJ", "jcardenas", "write")
+	if err != nil {
+		t.Fatalf("SetProjectUserPermission: %v", err)
+	}
+	if got.Permission != "write" {
+		t.Errorf("expected write, got %q", got.Permission)
+	}
+	fetched, err := client.GetProjectUserPermission(ctx, "PROJ", "jcardenas")
+	if err != nil {
+		t.Fatalf("GetProjectUserPermission: %v", err)
+	}
+	if fetched.Permission != "write" {
+		t.Errorf("expected write, got %q", fetched.Permission)
+	}
+}
+
+func TestHookCRUD(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repositories/test-workspace/payments-api/hooks", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		var body Hook
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decoding body: %v", err)
+		}
+		body.UUID = "hook-1"
+		writeJSON(t, w, http.StatusCreated, body)
+	})
+	mux.HandleFunc("/repositories/test-workspace/payments-api/hooks/hook-1", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, Hook{UUID: "hook-1", URL: "https://example.com/hook", Active: true, Events: []string{"repo:push"}})
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	created, err := client.CreateHook(ctx, "payments-api", &Hook{URL: "https://example.com/hook", Active: true, Events: []string{"repo:push"}})
+	if err != nil {
+		t.Fatalf("CreateHook: %v", err)
+	}
+	if created.UUID != "hook-1" {
+		t.Errorf("expected uuid hook-1, got %q", created.UUID)
+	}
+
+	fetched, err := client.GetHook(ctx, "payments-api", "hook-1")
+	if err != nil {
+		t.Fatalf("GetHook: %v", err)
+	}
+	if fetched.URL != "https://example.com/hook" {
+		t.Errorf("expected url, got %q", fetched.URL)
+	}
+
+	if err := client.DeleteHook(ctx, "payments-api", "hook-1"); err != nil {
+		t.Fatalf("DeleteHook: %v", err)
+	}
+}
+
+func TestBranchingModelSettings(t *testing.T) {
+	mux := http.NewServeMux()
+	state := &BranchingModelSettings{
+		Development: &BranchingModelBranch{UseMainbranch: true},
+		Production:  &BranchingModelProduction{Enabled: false},
+	}
+	mux.HandleFunc("/repositories/test-workspace/payments-api/branching-model/settings", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, state)
+		case http.MethodPut:
+			var body BranchingModelSettings
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding body: %v", err)
+			}
+			state = &body
+			writeJSON(t, w, http.StatusOK, state)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	got, err := client.GetBranchingModelSettings(ctx, "payments-api")
+	if err != nil {
+		t.Fatalf("GetBranchingModelSettings: %v", err)
+	}
+	if !got.Development.UseMainbranch {
+		t.Errorf("expected development.use_mainbranch true")
+	}
+
+	updated, err := client.UpdateBranchingModelSettings(ctx, "payments-api", &BranchingModelSettings{
+		Development: &BranchingModelBranch{Name: "develop"},
+		Production:  &BranchingModelProduction{Enabled: true, Name: "main", UseMainbranch: true},
+	})
+	if err != nil {
+		t.Fatalf("UpdateBranchingModelSettings: %v", err)
+	}
+	if !updated.Production.Enabled {
+		t.Errorf("expected production.enabled true after update")
+	}
+}
+
+func TestGroupCRUDAndMembership(t *testing.T) {
+	mux := http.NewServeMux()
+	var groups []Group
+	members := map[string][]GroupMember{}
+
+	mux.HandleFunc("/groups/test-workspace/", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, groups)
+		case http.MethodPost:
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding body: %v", err)
+			}
+			g := Group{Name: body["name"], Slug: "release-managers"}
+			groups = append(groups, g)
+			writeJSON(t, w, http.StatusOK, g)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+	mux.HandleFunc("/groups/test-workspace/release-managers/", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodPut:
+			var body Group
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding body: %v", err)
+			}
+			body.Slug = "release-managers"
+			groups[0] = body
+			writeJSON(t, w, http.StatusOK, body)
+		case http.MethodDelete:
+			groups = nil
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+	mux.HandleFunc("/groups/test-workspace/release-managers/members/", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		writeJSON(t, w, http.StatusOK, members["release-managers"])
+	})
+	mux.HandleFunc("/groups/test-workspace/release-managers/members/jcardenas/", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		switch r.Method {
+		case http.MethodPut:
+			members["release-managers"] = []GroupMember{{UUID: "jcardenas", Username: "jcardenas"}}
+			w.WriteHeader(http.StatusOK)
+		case http.MethodDelete:
+			members["release-managers"] = nil
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	created, err := client.CreateGroup(ctx, &Group{Name: "Release Managers"})
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	if created.Slug != "release-managers" {
+		t.Fatalf("expected slug release-managers, got %q", created.Slug)
+	}
+
+	got, err := client.GetGroup(ctx, "release-managers")
+	if err != nil {
+		t.Fatalf("GetGroup: %v", err)
+	}
+	if got.Name != "Release Managers" {
+		t.Errorf("expected name Release Managers, got %q", got.Name)
+	}
+
+	updated, err := client.UpdateGroup(ctx, "release-managers", &Group{Name: "Release Managers", Permission: "write"})
+	if err != nil {
+		t.Fatalf("UpdateGroup: %v", err)
+	}
+	if updated.Permission != "write" {
+		t.Errorf("expected permission write, got %q", updated.Permission)
+	}
+
+	if err := client.AddGroupMember(ctx, "release-managers", "jcardenas"); err != nil {
+		t.Fatalf("AddGroupMember: %v", err)
+	}
+	isMember, err := client.IsGroupMember(ctx, "release-managers", "jcardenas")
+	if err != nil {
+		t.Fatalf("IsGroupMember: %v", err)
+	}
+	if !isMember {
+		t.Errorf("expected jcardenas to be a member")
+	}
+
+	if err := client.RemoveGroupMember(ctx, "release-managers", "jcardenas"); err != nil {
+		t.Fatalf("RemoveGroupMember: %v", err)
+	}
+	isMember, err = client.IsGroupMember(ctx, "release-managers", "jcardenas")
+	if err != nil {
+		t.Fatalf("IsGroupMember: %v", err)
+	}
+	if isMember {
+		t.Errorf("expected jcardenas to no longer be a member")
+	}
+
+	if err := client.DeleteGroup(ctx, "release-managers"); err != nil {
+		t.Fatalf("DeleteGroup: %v", err)
+	}
+}
+
+func TestUserAndWorkspaceLookups(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/users/jcardenas", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		writeJSON(t, w, http.StatusOK, User{UUID: "{u}", Username: "jcardenas", DisplayName: "Jesus Cardenas"})
+	})
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		writeJSON(t, w, http.StatusOK, User{UUID: "{me}", Username: "acting-user"})
+	})
+	mux.HandleFunc("/workspaces/test-workspace", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		writeJSON(t, w, http.StatusOK, Workspace{Slug: "test-workspace", Name: "Test Workspace", IsPrivate: true})
+	})
+	mux.HandleFunc("/workspaces/test-workspace/members", func(w http.ResponseWriter, r *http.Request) {
+		checkBasicAuth(t, r)
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"values": []map[string]any{
+				{"user": map[string]string{"uuid": "{a}", "username": "alice"}},
+				{"user": map[string]string{"uuid": "{b}", "username": "bob"}},
+			},
+		})
+	})
+
+	client, _ := newTestClient(t, mux)
+	ctx := context.Background()
+
+	user, err := client.GetUser(ctx, "jcardenas")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if user.DisplayName != "Jesus Cardenas" {
+		t.Errorf("expected display name, got %q", user.DisplayName)
+	}
+
+	me, err := client.GetCurrentUser(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentUser: %v", err)
+	}
+	if me.Username != "acting-user" {
+		t.Errorf("expected acting-user, got %q", me.Username)
+	}
+
+	ws, err := client.GetWorkspace(ctx)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if ws.Name != "Test Workspace" {
+		t.Errorf("expected Test Workspace, got %q", ws.Name)
+	}
+
+	members, err := client.ListWorkspaceMembers(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaceMembers: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("expected 2 members, got %d", len(members))
+	}
+	if members[0].Username != "alice" || members[1].Username != "bob" {
+		t.Errorf("unexpected members: %+v", members)
 	}
 }
 

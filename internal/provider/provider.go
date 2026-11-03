@@ -110,6 +110,16 @@ func (p *bitbucketProvider) Resources(_ context.Context) []func() resource.Resou
 		NewDeploymentVariableResource,
 		NewRepositoryGroupPermissionResource,
 		NewRepositoryUserPermissionResource,
+		NewProjectGroupPermissionResource,
+		NewProjectUserPermissionResource,
+		NewDefaultReviewerResource,
+		NewProjectDefaultReviewerResource,
+		NewGroupResource,
+		NewGroupMembershipResource,
+		NewHookResource,
+		NewWorkspaceHookResource,
+		NewBranchingModelResource,
+		NewProjectBranchingModelResource,
 	}
 }
 
@@ -117,6 +127,13 @@ func (p *bitbucketProvider) DataSources(_ context.Context) []func() datasource.D
 	return []func() datasource.DataSource{
 		NewProjectDataSource,
 		NewRepositoryDataSource,
+		NewWorkspaceDataSource,
+		NewUserDataSource,
+		NewCurrentUserDataSource,
+		NewGroupDataSource,
+		NewGroupsDataSource,
+		NewGroupMembersDataSource,
+		NewWorkspaceMembersDataSource,
 	}
 }
 
